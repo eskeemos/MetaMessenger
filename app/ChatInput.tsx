@@ -3,27 +3,39 @@
 import { FormEvent, HtmlHTMLAttributes, useState } from "react"
 import { v4 as uuid } from 'uuid';
 import { Message } from "../typings";
+import useSWR from 'swr';
+import fetcher from "../utils/fetchMessages";
+import { unstable_getServerSession } from "next-auth";
+import { Session } from "inspector";
 
-function ChatInput() {
+type Props = {
+  session: Awaited<ReturnType<typeof unstable_getServerSession>>
+}
+
+function ChatInput({ session }: Props) {
   const [input, setInput] = useState("");
-  const addMessage = (e: FormEvent<HTMLFormElement>) => {
+  const { data: messages, error, mutate } = useSWR('/api/getMessages', fetcher);
+
+  const addMessage = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!input) return;
+    if (!input || !session) return;
     const messageToSent = input;
     setInput('');
 
     const id = uuid();
+
+
     const message: Message = {
       id,
       message: messageToSent,
       createdAt: Date.now(),
-      username: 'Lukasz Michalik',
-      profilePic: 'tinyurl.com/2p8452h2',
-      email: 'luk@gmail.com'
+      username: session?.user?.name!,
+      profilePic: session?.user?.image!,
+      email: session?.user?.email!
     }
 
     const uploadMessage = async () => {
-      const res = await fetch('/api/addMessage', {
+      const data = await fetch('/api/addMessage', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -31,20 +43,22 @@ function ChatInput() {
         body: JSON.stringify({
           message
         })
-      });
-
-      const data = await res.json();
-      console.log("MESSAGE ADDED >>> ", data);
-      
+      }).then(res => res.json());
+      return [data.message, ...messages!];
     };
-    
-    uploadMessage();
+
+    await mutate(uploadMessage, {
+      optimisticData: [message, ...messages!],
+      rollbackOnError: true
+    });
   }
+
   return (
-    <form onSubmit={addMessage} className='fixed bottom-0 z-50 w-full px-10 py-5 space-x-2 
-    border-t border-gray-100'>
+    <form onSubmit={addMessage} className='fixed flex bottom-0 z-50 w-full px-10 py-5 space-x-2 
+    border-t border-gray-100 bg-white'>
       <input
         type="text"
+        disabled={!session}
         value={input}
         onChange={(e) => setInput(e.target.value)}
         placeholder='Enter message here'
